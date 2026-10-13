@@ -4,8 +4,8 @@
 
 Voice typing for macOS, powered by [Sarvam AI](https://sarvam.ai). Hold **fn**, talk, let go, and clean, well-formatted text appears wherever your cursor is: Slack, Mail, Zed, Cursor, Terminal, the browser, anywhere.
 
-- **Native and small.** Swift and SwiftUI with Metal, no third-party dependencies. The app is under 2 MB and idles at 0% CPU. The mic is only on while you're dictating.
-- **Fast.** Sarvam `saaras:v4` transcribes in well under a second, and `sarvam-105b-conversations` formats in about 0.3–0.5 s.
+- **Native and small.** Swift, SwiftUI and Metal, with one dependency (FluidAudio, for Parakeet). The app is about 15 MB and idles at 0% CPU. The mic is only on while you're dictating.
+- **Fast, and private if you want it.** Speech can run on your Mac with NVIDIA Parakeet (about 0.1 s) or in the cloud with Sarvam. Formatting can run on your Mac with Google's Gemma 4 or in the cloud with Sarvam.
 - **Indian languages and code-mixing.** Auto-detects English, Hindi, Tamil, Telugu, Bengali and more. Output can be native script, English translation, Hinglish or romanized.
 
 ## Controls
@@ -19,6 +19,23 @@ Voice typing for macOS, powered by [Sarvam AI](https://sarvam.ai). Hold **fn**, 
 | Paste last dictation again | `⌃⌘V` |
 
 A single quick press of `fn` does nothing, so a stray press never leaves the mic on. Right ⌥, right ⌘ or right ⌃ can be used as the trigger instead of `fn`.
+
+## Setups
+
+On first launch, Home shows **Choose your setup**: the four setups below compared on one time scale. You can open the comparison again any time under Settings → Compare setups and speeds.
+
+| Setup | Speech | Formatting | Time per dictation* | Disk | Memory | Privacy |
+|---|---|---|---|---|---|---|
+| **Fastest** | Parakeet (this Mac) | off | ≈ 0.1 s | 485 MB | ≈ 60 MB | private |
+| **Smart and private** (recommended) | Parakeet (this Mac) | Gemma 4 E4B (this Mac) | ≈ 1.0 s | ≈ 7.2 GB | ≈ 5 GB | private |
+| **All Gemma** | Gemma 4 E4B (this Mac) | Gemma 4 E4B (this Mac) | ≈ 3.5 s | ≈ 6.7 GB | ≈ 5 GB | private |
+| **Cloud** | Sarvam `saaras:v4` | Sarvam `sarvam-105b-conversations` | ≈ 0.9 s | 15 MB | ≈ 50 MB | cloud |
+
+\*For a 7.5-second dictation on a MacBook with Apple M4 (24 GB), with models already loaded.
+
+- **Parakeet** (NVIDIA `parakeet-tdt-0.6b-v3`, run through [FluidAudio](https://github.com/FluidInference/FluidAudio) on the Neural Engine) downloads automatically on first use (469 MB). It covers English and 24 European languages. For Hindi and other Indian languages, use Sarvam for speech.
+- **Gemma 4 E4B** runs through [Ollama](https://ollama.com). Install Ollama (0.31 or later), then run `ollama pull gemma4:e4b-it-qat` (6.1 GB). The QAT build is about twice as fast on Apple Silicon as the default `gemma4:e4b`. Any OpenAI-compatible server (LM Studio, mlx_lm, llama.cpp) also works: set it under Settings → Intelligence.
+- **Sarvam** needs an API key (see below).
 
 ## Features
 
@@ -34,10 +51,10 @@ A single quick press of `fn` does nothing, so a stray press never leaves the mic
 
 ## Build and install
 
-Requires macOS 14 or later on Apple Silicon, Xcode command-line tools, and a [Sarvam API key](https://dashboard.sarvam.ai).
+Requires macOS 14 or later on Apple Silicon and Xcode command-line tools. A [Sarvam API key](https://dashboard.sarvam.ai) is needed only for the Cloud setup, or if you use Sarvam for speech or formatting.
 
 ```bash
-cp .env.example .env          # then put your Sarvam key in .env
+cp .env.example .env          # optional: put your Sarvam key in .env
 ./scripts/build-app.sh        # builds, signs, installs to /Applications, launches
 ```
 
@@ -54,6 +71,9 @@ swift build -c release
 .build/release/TypeLikeMe --selftest some16kmono.wav                          # headless Sarvam pipeline test
 .build/release/TypeLikeMe --format "um so we ship friday" - Slack com.tinyspeck.slackmacgap   # formatting check
 TYPELIKEME_PILL_DEMO=1 .build/release/TypeLikeMe                              # loop the bar animation (no mic, never pastes)
+TLM_SPEECH=parakeet .build/release/TypeLikeMe --selftest clip.wav             # speech engine: parakeet | local (Gemma) | default Sarvam
+TLM_ENGINE=local .build/release/TypeLikeMe --format "..." - Zed dev.zed.Zed   # format with local Gemma instead of Sarvam
+.build/release/TypeLikeMe --parakeet-bench clip.wav 20                        # Parakeet load time and speed
 TYPELIKEME_DEMO=1 .build/release/TypeLikeMe                                   # dashboard with sample data
 # diagnostics log: ~/Library/Logs/TypeLikeMe.log (never contains your key)
 ```
@@ -66,6 +86,8 @@ Sources/TypeLikeMe/
   Core/
     AudioRecorder              16 kHz capture, live levels, WAV encoding, chunking at pauses
     SarvamClient               speech-to-text (keyterms), formatting, Prompt mode, command mode
+    ParakeetEngine             on-device speech recognition (Parakeet via FluidAudio)
+    LocalLLM                   local models via Ollama or OpenAI-compatible servers (Gemma 4)
     DictationController        hold / double-press / command / cancel state machine and pipeline
     HotkeyMonitor              event tap for fn and modifiers on its own thread
     CursorContext              text before the cursor, caret position, text-field detection
@@ -76,5 +98,5 @@ Sources/TypeLikeMe/
     PixelFont                  hand-drawn proportional pixel font
     PillOverlay                the dictation bar
     CopyCard, FlightPanel, Theme
-  Dashboard/                   Home, History, Dictionary, Style, Settings
+  Dashboard/                   Home, setup chooser, History, Dictionary, Style, Settings
 ```
