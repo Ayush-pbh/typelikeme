@@ -33,6 +33,14 @@ struct DashboardView: View {
     @State private var query = ""
 
     var body: some View {
+        if !settings.onboarded {
+            OnboardingView(controller: controller, perms: perms, settings: settings, store: store)
+        } else {
+            dashboard
+        }
+    }
+
+    private var dashboard: some View {
         HStack(spacing: 0) {
             Sidebar(page: $page, controller: controller)
                 .frame(width: 216)

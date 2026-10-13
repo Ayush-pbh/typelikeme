@@ -23,12 +23,14 @@ struct SetupOption: Identifiable {
     func apply(to s: AppSettings) {
         switch id {
         case "fastest":
-            s.transcriber = "parakeet"; s.polish = .off
+            s.transcriber = "parakeet"; s.engine = "off"; s.polish = .off
+        case "tiny":
+            s.transcriber = "whistle"; s.engine = "off"; s.polish = .off
         case "private":
-            s.transcriber = "parakeet"; s.engine = "local"; s.localKind = "ollama"
+            s.transcriber = "parakeet"; s.engine = "gemma"; s.localKind = "ollama"
             s.localModel = "gemma4:e4b-it-qat"; if s.polish == .off { s.polish = .clean }
         case "gemma":
-            s.transcriber = "local"; s.engine = "local"; s.localKind = "ollama"
+            s.transcriber = "gemma"; s.engine = "gemma"; s.localKind = "ollama"
             s.localModel = "gemma4:e4b-it-qat"; if s.polish == .off { s.polish = .clean }
         default:
             s.transcriber = "sarvam"; s.engine = "sarvam"; if s.polish == .off { s.polish = .clean }
@@ -40,6 +42,10 @@ struct SetupOption: Identifiable {
         SetupOption(id: "fastest", title: "Fastest", detail: "Your words, punctuated, exactly as said. No clean-up or lists.",
                     speech: "Parakeet", formatting: "Off", speechTime: 0.08, formatTime: 0,
                     disk: "485 MB", memory: "60 MB", privacy: "Private", languages: "English + 24",
+                    needsGemma: false, needsKey: false),
+        SetupOption(id: "tiny", title: "Tiny", detail: "Same as Fastest with a 17 MB model on the CPU. Fewer languages.",
+                    speech: "Whistle", formatting: "Off", speechTime: 0.05, formatTime: 0,
+                    disk: "17 MB", memory: "80 MB", privacy: "Private", languages: "English + 6",
                     needsGemma: false, needsKey: false),
         SetupOption(id: "private", title: "Smart and private", detail: "Clean text, lists and prompts for AI tools. Everything stays on this Mac.",
                     speech: "Parakeet", formatting: "Gemma 4 E4B", speechTime: 0.08, formatTime: 0.9,
@@ -194,6 +200,7 @@ struct SetupChooser: View {
             Button("Use \(option.title)") {
                 option.apply(to: settings)
                 if option.speech == "Parakeet" { Task { try? await ParakeetEngine.shared.prepare() } }
+                if option.speech == "Whistle" { Task { try? await WhistleEngine.shared.prepare() } }
                 onDone?()
             }
             .buttonStyle(ActionButtonStyle(prominent: true))

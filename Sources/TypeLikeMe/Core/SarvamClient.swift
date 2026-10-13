@@ -24,11 +24,13 @@ enum SarvamError: LocalizedError {
     /// Short, actionable wording for any error, sized for the pill.
     static func describe(_ error: Error) -> String {
         if let e = error as? SarvamError { return e.errorDescription ?? "Transcription failed" }
+        if let e = error as? EngineError { return e.errorDescription ?? "Transcription failed" }
+        if let e = error as? LocalLLMError { return e.errorDescription ?? "The local model failed" }
         if let u = error as? URLError {
             switch u.code {
             case .notConnectedToInternet, .networkConnectionLost: return "No internet connection"
-            case .timedOut: return "Sarvam timed out, try again"
-            default: return "Couldn't reach Sarvam"
+            case .timedOut: return "The speech service timed out, try again"
+            default: return "Couldn't reach the speech service"
             }
         }
         return error.localizedDescription
@@ -53,10 +55,14 @@ enum ChatEngine: Equatable {
 struct SarvamClient {
     var apiKey: String
     var engine: ChatEngine = .sarvam
-    /// Where speech is transcribed: Sarvam, or a local audio model (Gemma 4 via Ollama).
+    /// Keys for every cloud provider (the Sarvam one is `apiKey`).
+    var keys: [String: String] = [:]
+    /// Who transcribes speech.
+    var speech: Provider = .sarvam
+    /// Who formats text (Prompt mode, polish, command mode); `engine` carries the local server for Gemma.
+    var formatter: Provider = .sarvam
+    /// Endpoint and model for Gemma speech via Ollama.
     var localSpeech: (endpoint: String, model: String)? = nil
-    /// Use Parakeet on this Mac for speech recognition.
-    var parakeet = false
     static let chatModel = "sarvam-105b-conversations"
 
     private static let session: URLSession = {
@@ -75,8 +81,12 @@ struct SarvamClient {
 
     func transcribe(samples: [Int16], model: String, language: String, mode: OutputMode, keyterms: [String] = []) async throws -> Transcript {
         // Parakeet takes the whole recording at once (it windows long audio itself).
-        if parakeet {
+        if speech == .parakeet {
             return Transcript(text: try await ParakeetEngine.shared.transcribe(samples), language: language)
+        }
+        // Whistle also takes the whole recording (30 s windows inside the engine).
+        if speech == .whistle {
+            return Transcript(text: try await WhistleEngine.shared.transcribe(samples, language: language, keyterms: keyterms), language: language)
         }
         let pieces = WAV.chunks(samples)
         if pieces.count == 1 {
@@ -97,8 +107,13 @@ struct SarvamClient {
     }
 
     func transcribe(wav: Data, model: String, language: String, mode: OutputMode, keyterms: [String] = []) async throws -> Transcript {
-        if let local = localSpeech {
+        if speech == .gemma {
+            let local = localSpeech ?? ("http://localhost:11434", "gemma4:e4b-it-qat")
             let text = try await LocalLLM.transcribe(endpoint: local.endpoint, model: local.model, wav: wav, keyterms: keyterms)
+            return Transcript(text: text, language: language)
+        }
+        if speech != .sarvam {
+            let text = try await CloudSpeech.transcribe(speech, key: keys[speech.rawValue] ?? "", wav: wav, language: language, keyterms: keyterms)
             return Transcript(text: text, language: language)
         }
         guard !apiKey.isEmpty else { throw SarvamError.missingKey }
@@ -434,9 +449,13 @@ struct SarvamClient {
         let messages: [[String: Any]] = [["role": "system", "content": system]]
             + examples.flatMap { [["role": "user", "content": $0.0], ["role": "assistant", "content": $0.1]] }
             + [["role": "user", "content": user]]
-        if case let .local(kind, endpoint, localModel) = engine {
+        if formatter == .gemma, case let .local(kind, endpoint, localModel) = engine {
             return try await LocalLLM.chat(kind: kind, endpoint: endpoint, model: localModel, messages: messages,
                                            maxTokens: maxTokens, temperature: temperature)
+        }
+        if formatter != .sarvam {
+            return try await CloudSpeech.chat(formatter, key: keys[formatter.rawValue] ?? "", messages: messages, maxTokens: maxTokens,
+                                              temperature: temperature, model: model == Self.chatModel ? nil : model, reasoning: reasoning)
         }
         guard !apiKey.isEmpty else { throw SarvamError.missingKey }
         var req = URLRequest(url: URL(string: "https://api.sarvam.ai/v1/chat/completions")!)

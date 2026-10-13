@@ -19,3 +19,6 @@ config.json
 # macOS and logs
 .DS_Store
 *.log
+
+# Cactus Needle engine (fetched by scripts/build-app.sh)
+Vendor/needle/libneedle.a

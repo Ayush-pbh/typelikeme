@@ -67,6 +67,7 @@ final class DictationController: ObservableObject {
             DispatchQueue.main.async { self?.handle(e) }
         }
         settings.$trigger.sink { [weak self] t in self?.hotkeys.trigger = t }.store(in: &cancellables)
+        settings.$recordingTrigger.sink { [weak self] r in self?.hotkeys.paused = r }.store(in: &cancellables)
     }
 
     func start() {
@@ -248,8 +249,8 @@ final class DictationController: ObservableObject {
             flash(.error("Allow microphone access in Settings"))
             return
         }
-        guard !settings.apiKey.isEmpty || !settings.needsSarvamKey else {
-            flash(.error("Add your Sarvam API key in Settings"))
+        if let p = settings.missingKey {
+            flash(.error("Add your \(p.name) API key in Settings"))
             return
         }
         resetWork?.cancel()
@@ -270,7 +271,7 @@ final class DictationController: ObservableObject {
         context = CursorContext.capture()
         phase = .listening
         Sound.play(.start)
-        SarvamClient.warmUp()
+        if settings.speechProvider == .sarvam || settings.formatProvider == .sarvam { SarvamClient.warmUp() }
         // Load the local model while you talk, so formatting doesn't wait for a cold start.
         if case let .local(kind, endpoint, model) = settings.chatEngine { LocalLLM.warmUp(kind: kind, endpoint: endpoint, model: model) }
         else if let speech = settings.localSpeech { LocalLLM.warmUp(kind: .ollama, endpoint: speech.endpoint, model: speech.model) }
@@ -322,10 +323,8 @@ final class DictationController: ObservableObject {
         phase = .processing
         Sound.play(.stop)
 
-        var client = SarvamClient(apiKey: settings.apiKey)
-        client.engine = settings.chatEngine
-        client.localSpeech = settings.localSpeech
-        client.parakeet = settings.useParakeet
+        let client = settings.client()
+        let canFormat = settings.formatProvider != nil
         let s = settings
         let ctx = context ?? CursorContext(before: nil, appName: "", bundleID: "")
         let vocab = store.vocabulary
@@ -344,11 +343,14 @@ final class DictationController: ObservableObject {
 
                 var output: String
                 if isCommand {
+                    guard canFormat else {
+                        throw NSError(domain: "TypeLikeMe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Command mode needs a formatting engine"])
+                    }
                     let selection = await TextInserter.copySelection()
                     output = try await client.command(instruction: raw, selection: selection)
                 } else if let expansion = self?.store.expandSnippet(raw) {
                     output = expansion
-                } else if s.promptMode, SarvamClient.isAITool(ctx), raw.split(separator: " ").count > 2 {
+                } else if canFormat, s.promptMode, SarvamClient.isAITool(ctx), raw.split(separator: " ").count > 2 {
                     do {
                         output = try await client.promptify(raw, context: ctx, vocabulary: vocab)
                         Log.write("prompt mode (\(ctx.appName))")
@@ -356,7 +358,7 @@ final class DictationController: ObservableObject {
                         Log.write("prompt mode failed: \(error)")
                         output = Cleanup.local(raw)
                     }
-                } else if s.polish != .off, raw.split(separator: " ").count > 2 {
+                } else if canFormat, s.polish != .off, raw.split(separator: " ").count > 2 {
                     do {
                         output = try await client.polish(raw, style: s.polish, context: s.contextAware ? ctx : CursorContext(before: ctx.before, appName: "", bundleID: ""), vocabulary: vocab, smart: s.smartFormat)
                     } catch {
@@ -372,7 +374,7 @@ final class DictationController: ObservableObject {
                     output = SmartJoin.apply(output, before: ctx.before, adjustCase: s.polish == .off)
                 }
                 let final = output
-                Log.write("done speech=\(s.useParakeet ? "parakeet" : (s.localSpeech != nil ? "gemma" : "sarvam")) format=\(s.engine) stt=\(sttMs)ms total=\(Int(Date().timeIntervalSince(t0) * 1000))ms words=\(final.split(separator: " ").count)")
+                Log.write("done speech=\(s.speechProvider.rawValue) format=\(s.formatProvider?.rawValue ?? "off") stt=\(sttMs)ms total=\(Int(Date().timeIntervalSince(t0) * 1000))ms words=\(final.split(separator: " ").count)")
 
                 await MainActor.run {
                     guard let self else { return }

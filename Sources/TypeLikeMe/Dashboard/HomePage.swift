@@ -13,10 +13,6 @@ struct HomePage: View {
             if !perms.allGood {
                 SetupPanel(perms: perms, settings: settings, go: go)
             }
-            // New users pick how TypeLikeMe runs, with real timings side by side.
-            if settings.setupChosen.isEmpty || ProcessInfo.processInfo.environment["TYPELIKEME_SHOW_SETUP"] != nil {
-                SetupChooser(settings: settings)
-            }
             Hero(controller: controller, settings: settings)
             if store.history.count < 5 {
                 TryIt(trigger: settings.trigger.short)
@@ -106,7 +102,8 @@ struct SetupPanel: View {
             PanelLabel(title: "Finish setup", trailing: "\(done) of 4")
             Panel {
                 VStack(spacing: 0) {
-                    row(!settings.apiKey.isEmpty, "key", "Sarvam API key", "Needed to transcribe speech", "Add key") { go(.settings) }
+                    row(settings.engineReady, "key", "Engine: \(settings.speechProvider.name)",
+                        settings.missingKey.map { "Add your \($0.name) API key" } ?? "Ready", "Add key") { go(.settings) }
                     Divider1()
                     row(perms.mic, "mic", "Microphone", "Only on while you dictate", "Allow") { perms.requestMic() }
                     Divider1()
@@ -116,11 +113,9 @@ struct SetupPanel: View {
                 }
             }
         }
-        .onAppear { if perms.allGood { settings.onboarded = true } }
-        .onChange(of: perms.allGood) { _, ok in if ok { settings.onboarded = true } }
     }
 
-    private var done: Int { [!settings.apiKey.isEmpty, perms.mic, perms.accessibility, perms.fnReady].filter { $0 }.count }
+    private var done: Int { [settings.engineReady, perms.mic, perms.accessibility, perms.fnReady].filter { $0 }.count }
 
     private func row(_ ok: Bool, _ icon: String, _ title: String, _ detail: String, _ action: String, _ perform: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {

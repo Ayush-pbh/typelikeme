@@ -397,26 +397,9 @@ struct SettingRow<Trailing: View>: View {
 struct SettingsPage: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var perms: Permissions
-    @State private var keyDraft = ""
-    @State private var keyStatus: (ok: Bool, text: String)?
-    @State private var checking = false
     @State private var localStatus: (ok: Bool, text: String)?
     @State private var showSetups = false
-    @State private var parakeetReady = false
-    @State private var parakeetStatus = "Checking Parakeet…"
-
-    /// Loads Parakeet if needed (first time downloads 469 MB) and reports when it's ready.
-    private func loadParakeet() async {
-        if await ParakeetEngine.shared.isReady { parakeetReady = true; parakeetStatus = "Parakeet is ready on this Mac"; return }
-        parakeetReady = false
-        parakeetStatus = "Loading Parakeet (first time downloads 469 MB)…"
-        do {
-            try await ParakeetEngine.shared.prepare()
-            parakeetReady = true; parakeetStatus = "Parakeet is ready on this Mac"
-        } catch {
-            parakeetStatus = "Parakeet couldn't load: \(error.localizedDescription)"
-        }
-    }
+    @StateObject private var loader = ModelLoader()
     @State private var localChecking = false
 
     private func checkLocal() {
@@ -432,83 +415,31 @@ struct SettingsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            section("Transcription") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Sarvam API key")
-                        Spacer()
-                        if let keyStatus {
-                            Label(keyStatus.text, systemImage: keyStatus.ok ? "checkmark" : "exclamationmark.triangle.fill")
-                                .font(.system(size: 12)).foregroundStyle(keyStatus.ok ? Theme.green : Theme.yellow)
-                        }
-                    }
-                    HStack(spacing: 8) {
-                        PlainField(text: $keyDraft, placeholder: settings.apiKey.isEmpty ? "Paste your key" : "Saved key ending in \(settings.apiKey.suffix(4))", secure: true) { saveKey() }
-                        Button("Save", action: saveKey).buttonStyle(ActionButtonStyle()).disabled(keyDraft.isEmpty)
-                        Button(checking ? "Checking…" : "Check", action: checkKey).buttonStyle(ActionButtonStyle())
-                            .disabled(checking || settings.apiKey.isEmpty)
-                    }
+            section("Engines") {
+                SettingRow(title: "Speech recognition", detail: settings.speechProvider.blurb) {
+                    SpeechEnginePicker(settings: settings)
                 }
-                .padding(12)
-                Divider1()
-                SettingRow(title: "Language", detail: "Auto-detect covers English, Hindi and 9 other Indian languages, including mixed speech") {
-                    Picker("", selection: $settings.language) {
-                        ForEach(Language.all) { Text($0.name).tag($0.code) }
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                Divider1()
-                SettingRow(title: "Speech model", detail: "saaras:v4 hears your Dictionary words and coding terms best") {
-                    Picker("", selection: $settings.sttModel) {
-                        Text("saaras:v4").tag("saaras:v4")
-                        Text("saaras:v3").tag("saaras:v3")
-                        Text("saarika:v2.5").tag("saarika:v2.5")
-                    }
-                    .labelsHidden().fixedSize()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                if showSetups {
-                    SetupChooser(settings: settings) { showSetups = false }
-                } else {
-                    Button { showSetups = true } label: {
-                        Label("Compare setups and speeds", systemImage: "gauge.with.dots.needle.67percent")
-                    }
-                    .buttonStyle(ActionButtonStyle())
-                }
-            }
-
-            section("Intelligence") {
-                SettingRow(title: "Speech recognition", detail: settings.transcriber == "parakeet"
-                           ? "NVIDIA Parakeet on this Mac. Fastest; English and European languages only (no Hindi)."
-                           : settings.transcriber == "local"
-                           ? "Transcribed on this Mac by the local model below (Ollama only)."
-                           : "Sarvam saaras:v4, with your Dictionary words as keyterms.") {
-                    Picker("", selection: $settings.transcriber) {
-                        Text("Sarvam (cloud)").tag("sarvam")
-                        Text("Parakeet (this Mac)").tag("parakeet")
-                        Text("Gemma (this Mac)").tag("local")
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                if settings.transcriber == "parakeet" {
-                    Label(parakeetStatus, systemImage: parakeetReady ? "checkmark" : "arrow.down.circle")
-                        .font(.system(size: 12)).foregroundStyle(parakeetReady ? Theme.green : Theme.secondary)
+                if settings.speechProvider.needsKey {
+                    Divider1()
+                    ProviderKeyField(provider: settings.speechProvider, settings: settings)
+                } else if settings.speechProvider != .gemma {
+                    ModelLoaderStatus(loader: loader)
                         .padding(.horizontal, 12).padding(.bottom, 12)
-                        .task(id: settings.transcriber) { await loadParakeet() }
+                        .task(id: settings.transcriber) { loader.load(settings.speechProvider, settings: settings) }
                 }
                 Divider1()
-                SettingRow(title: "Formatting engine", detail: settings.engine == "local"
+                SettingRow(title: "Formatting", detail: settings.formatProvider == nil
+                           ? "Off: only fillers and punctuation are tidied. Prompt mode and command mode need an engine."
+                           : settings.formatProvider == .gemma
                            ? "Formats and writes prompts on this Mac. Nothing is sent anywhere for this step."
-                           : "Sarvam's cloud model formats your text and writes prompts.") {
-                    Picker("", selection: $settings.engine) {
-                        Text("Sarvam (cloud)").tag("sarvam")
-                        Text("Local model").tag("local")
-                    }
-                    .labelsHidden().fixedSize()
+                           : "\(settings.formatProvider!.name) formats your text, writes prompts and runs command mode.") {
+                    FormatEnginePicker(settings: settings)
                 }
-                if settings.engine == "local" || settings.transcriber == "local" {
+                if let f = settings.formatProvider, f.needsKey, f != settings.speechProvider {
+                    Divider1()
+                    ProviderKeyField(provider: f, settings: settings)
+                }
+                if settings.formatProvider == .gemma || settings.speechProvider == .gemma {
                     Divider1()
                     SettingRow(title: "Server", detail: "Ollama by default. LM Studio, mlx_lm and llama.cpp work as OpenAI-compatible.") {
                         Picker("", selection: $settings.localKind) {
@@ -530,14 +461,47 @@ struct SettingsPage: View {
                             .padding(.horizontal, 12).padding(.bottom, 12)
                     }
                 }
+                Divider1()
+                SettingRow(title: "Language", detail: "Auto-detect works with every engine. Indian languages need Sarvam, Gemini or ElevenLabs") {
+                    Picker("", selection: $settings.language) {
+                        ForEach(Language.all) { Text($0.name).tag($0.code) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                if settings.speechProvider == .sarvam {
+                    Divider1()
+                    SettingRow(title: "Sarvam speech model", detail: "saaras:v4 hears your Dictionary words and coding terms best") {
+                        Picker("", selection: $settings.sttModel) {
+                            Text("saaras:v4").tag("saaras:v4")
+                            Text("saaras:v3").tag("saaras:v3")
+                            Text("saarika:v2.5").tag("saarika:v2.5")
+                        }
+                        .labelsHidden().fixedSize()
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                if showSetups {
+                    SetupChooser(settings: settings) { showSetups = false }
+                } else {
+                    Button { showSetups = true } label: {
+                        Label("Compare on-device setups and speeds", systemImage: "gauge.with.dots.needle.67percent")
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                }
             }
 
             section("Keyboard") {
                 SettingRow(title: "Dictation key", detail: "Hold to talk. Double-press for hands-free, then press once to finish. Add ⌃ for a command, esc to cancel") {
-                    Picker("", selection: $settings.trigger) {
-                        ForEach(TriggerKey.allCases) { Text($0.label).tag($0) }
+                    HStack(spacing: 8) {
+                        Picker("", selection: $settings.trigger) {
+                            ForEach(TriggerKey.presets) { Text($0.label).tag($0) }
+                            if !settings.trigger.isPreset { Text(settings.trigger.label).tag(settings.trigger) }
+                        }
+                        .labelsHidden().fixedSize()
+                        TriggerRecorder(settings: settings)
                     }
-                    .labelsHidden().fixedSize()
                 }
                 if settings.trigger == .fn {
                     Divider1()
@@ -600,28 +564,6 @@ struct SettingsPage: View {
             Text("Allowed").font(.system(size: 12)).foregroundStyle(Theme.green)
         } else {
             Button(action, action: perform).buttonStyle(ActionButtonStyle(prominent: true))
-        }
-    }
-
-    private func saveKey() {
-        guard !keyDraft.isEmpty else { return }
-        settings.saveAPIKey(keyDraft)
-        keyDraft = ""
-        checkKey()
-    }
-
-    private func checkKey() {
-        checking = true
-        keyStatus = nil
-        let key = settings.apiKey
-        Task {
-            do {
-                let wav = WAV.encode(ArraySlice(Array(repeating: Int16(0), count: 8000)))
-                _ = try await SarvamClient(apiKey: key).transcribe(wav: wav, model: "saaras:v3", language: "unknown", mode: .transcribe)
-                await MainActor.run { keyStatus = (true, "Key works"); checking = false }
-            } catch {
-                await MainActor.run { keyStatus = (false, SarvamError.describe(error)); checking = false }
-            }
         }
     }
 }

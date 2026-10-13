@@ -29,7 +29,7 @@ final class Permissions: ObservableObject {
     }
 
     var fnReady: Bool { fnUsage == 0 || AppSettings.shared.trigger != .fn }
-    var allGood: Bool { mic && accessibility && fnReady && !AppSettings.shared.apiKey.isEmpty }
+    var allGood: Bool { mic && accessibility && fnReady && AppSettings.shared.engineReady }
 
     func requestMic() {
         if AVAuthorizationStatusIsDenied() {

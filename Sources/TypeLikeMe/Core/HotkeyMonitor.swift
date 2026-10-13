@@ -22,6 +22,8 @@ final class HotkeyMonitor {
 
     /// Read from the tap thread; written from main. A plain enum store is fine for this use.
     var trigger: TriggerKey = .fn
+    /// While the user records a new dictation key, every event passes straight through.
+    var paused = false
     var onEvent: ((Event) -> Void)?
     private(set) var isRunning = false
 
@@ -33,6 +35,12 @@ final class HotkeyMonitor {
 
     func start() {
         guard tap == nil else { return }
+        // Creating the tap without permission makes macOS pop its own prompt; onboarding asks at the right moment instead.
+        guard AXIsProcessTrusted() else {
+            retryTimer?.invalidate()
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { [weak self] _ in self?.start() }
+            return
+        }
         let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         let me = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -74,11 +82,13 @@ final class HotkeyMonitor {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return pass
+        case _ where paused:
+            return pass
         case .flagsChanged:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             let flags = event.flags
-            if code == trigger.keyCode {
-                let down = flags.contains(cgFlag(trigger))
+            if let flag = trigger.flag, code == trigger.keyCode {
+                let down = flags.contains(flag)
                 if down != triggerIsDown {
                     triggerIsDown = down
                     emit(down ? .triggerDown : .triggerUp)
@@ -93,12 +103,27 @@ final class HotkeyMonitor {
             }
             return pass
         case .keyUp:
+            // A non-modifier trigger (F5, ⌥Space…) ends on its own key-up, even if the modifiers went first.
+            if !trigger.isModifier, triggerIsDown, UInt16(event.getIntegerValueField(.keyboardEventKeycode)) == trigger.keyCode {
+                triggerIsDown = false
+                emit(.triggerUp)
+                return nil
+            }
             // The 🌐 key sends its own key code alongside the fn flag; swallow it too (it's what opens emoji).
             if trigger == .fn, event.getIntegerValueField(.keyboardEventKeycode) == Self.globeKeyCode { return nil }
             return pass
         case .keyDown:
             if event.getIntegerValueField(.eventSourceUserData) == syntheticTag { return pass }
             let code = event.getIntegerValueField(.keyboardEventKeycode)
+            if !trigger.isModifier, UInt16(code) == trigger.keyCode {
+                // Held key: swallow the auto-repeats (and ⌃ added for command mode) without re-triggering.
+                if triggerIsDown { return nil }
+                if event.flags.intersection(TriggerKey.comboMask).rawValue == trigger.modifiers {
+                    triggerIsDown = true
+                    emit(.triggerDown)
+                    return nil
+                }
+            }
             if triggerIsDown { Log.write("key \(code) while trigger held") }
             // Part of pressing fn itself, not a second key: never treat it as a chord.
             if code == Self.globeKeyCode { return trigger == .fn ? nil : pass }
@@ -121,12 +146,4 @@ final class HotkeyMonitor {
     /// Key code the 🌐/fn key reports on Apple keyboards.
     static let globeKeyCode: Int64 = 179
 
-    private func cgFlag(_ t: TriggerKey) -> CGEventFlags {
-        switch t {
-        case .fn: return .maskSecondaryFn
-        case .rightOption: return .maskAlternate
-        case .rightCommand: return .maskCommand
-        case .rightControl: return .maskControl
-        }
-    }
 }

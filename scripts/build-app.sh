@@ -10,6 +10,13 @@ BUNDLE_ID=com.typelikeme.app
 VERSION=1.0.0
 OUT=build/$APP.app
 
+# Cactus Needle engine for Whistle speech recognition (static library, not committed).
+if [ ! -f Vendor/needle/libneedle.a ]; then
+  echo "▸ Fetching Needle engine…"
+  mkdir -p Vendor/needle
+  curl -fsSL -o Vendor/needle/libneedle.a https://huggingface.co/Cactus-Compute/needle3/resolve/main/macos-arm64/libneedle.a
+fi
+
 echo "▸ Compiling (release)…"
 swift build -c release --arch arm64 2>&1 | grep -Ev "^\[|Compiling|Planning" || true
 BIN=.build/arm64-apple-macosx/release/$APP
@@ -70,7 +77,7 @@ mkdir -p "$CONF_DIR"
 if [ ! -s "$CONF_DIR/config.json" ] && [ -f .env ]; then
   KEY=$(grep -E '^SARVAM_API_KEY=' .env | head -1 | cut -d= -f2- | tr -d '"'"'"' \r')
   if [ -n "$KEY" ]; then
-    printf '{\n  "sarvamApiKey" : "%s"\n}\n' "$KEY" > "$CONF_DIR/config.json"
+    printf '{\n  "keys" : {\n    "sarvam" : "%s"\n  }\n}\n' "$KEY" > "$CONF_DIR/config.json"
     chmod 600 "$CONF_DIR/config.json"
     echo "▸ Sarvam key saved to $CONF_DIR/config.json"
   fi

@@ -9,12 +9,18 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
     ],
     targets: [
+        // Cactus Needle engine (C API) for on-device Whistle speech recognition.
+        .target(name: "CNeedle", path: "Sources/CNeedle"),
         .executableTarget(
             name: "TypeLikeMe",
-            dependencies: [.product(name: "FluidAudio", package: "FluidAudio")],
+            dependencies: [.product(name: "FluidAudio", package: "FluidAudio"), "CNeedle"],
             path: "Sources/TypeLikeMe",
             swiftSettings: [.unsafeFlags(["-Osize"], .when(configuration: .release))],
-            linkerSettings: [.unsafeFlags(["-Xlinker", "-dead_strip"])]
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-dead_strip", "-LVendor/needle"]),
+                .linkedLibrary("needle"),
+                .linkedLibrary("c++"),
+            ]
         )
     ],
     swiftLanguageVersions: [.v5]
