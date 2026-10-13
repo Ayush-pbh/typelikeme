@@ -402,6 +402,21 @@ struct SettingsPage: View {
     @State private var checking = false
     @State private var localStatus: (ok: Bool, text: String)?
     @State private var showSetups = false
+    @State private var parakeetReady = false
+    @State private var parakeetStatus = "Checking Parakeet…"
+
+    /// Loads Parakeet if needed (first time downloads 469 MB) and reports when it's ready.
+    private func loadParakeet() async {
+        if await ParakeetEngine.shared.isReady { parakeetReady = true; parakeetStatus = "Parakeet is ready on this Mac"; return }
+        parakeetReady = false
+        parakeetStatus = "Loading Parakeet (first time downloads 469 MB)…"
+        do {
+            try await ParakeetEngine.shared.prepare()
+            parakeetReady = true; parakeetStatus = "Parakeet is ready on this Mac"
+        } catch {
+            parakeetStatus = "Parakeet couldn't load: \(error.localizedDescription)"
+        }
+    }
     @State private var localChecking = false
 
     private func checkLocal() {
@@ -476,6 +491,12 @@ struct SettingsPage: View {
                         Text("Gemma (this Mac)").tag("local")
                     }
                     .labelsHidden().fixedSize()
+                }
+                if settings.transcriber == "parakeet" {
+                    Label(parakeetStatus, systemImage: parakeetReady ? "checkmark" : "arrow.down.circle")
+                        .font(.system(size: 12)).foregroundStyle(parakeetReady ? Theme.green : Theme.secondary)
+                        .padding(.horizontal, 12).padding(.bottom, 12)
+                        .task(id: settings.transcriber) { await loadParakeet() }
                 }
                 Divider1()
                 SettingRow(title: "Formatting engine", detail: settings.engine == "local"
