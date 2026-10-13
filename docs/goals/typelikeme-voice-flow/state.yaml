@@ -1,0 +1,329 @@
+version: 2
+
+goal:
+  title: "TypeLikeMe — next-gen voice dictation for macOS"
+  slug: "typelikeme-voice-flow"
+  kind: specific
+  tranche: "continuous execution: complete successive safe verified slices until the full original outcome is complete"
+  status: done
+  intake:
+    original_request: "Build a Wispr Flow–style app (Fn to talk, text at cursor, floating pill, great dashboard), Sarvam STT, very lightweight."
+    interpreted_outcome: "A native macOS menu-bar app that dictates into any app via Fn hold, with a live pill overlay and a polished dashboard."
+    input_shape: specific
+    audience: "Mac users who type a lot"
+    authority: approved
+    proof_type: demo
+    completion_proof: "Signed .app builds; CLI pipeline test transcribes via Sarvam; hotkey→record→paste path implemented; dashboard renders."
+    likely_misfire: "Pretty UI without a working hotkey/paste pipeline, or a heavy Electron app."
+    blind_spots_considered:
+      - "Fn/globe key default action conflicts"
+      - "TCC permissions reset on ad-hoc re-sign"
+      - "Sarvam 30s REST limit"
+      - "API key not compiled in"
+      - "Clipboard restore"
+    existing_plan_facts:
+      - "saaras:v3 STT verified 0.6s"
+      - "sarvam-105b-conversations polish verified 0.3s"
+      - "Apple Development signing identity available"
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    objective: "Verify Sarvam API models/latency, toolchain, and signing identities."
+    receipt:
+      result: done
+      evidence:
+        - "curl https://api.sarvam.ai/speech-to-text (models saarika:v2.5, saaras:v3, saaras:v4)"
+        - "curl https://api.sarvam.ai/v1/chat/completions (sarvam-105b-conversations)"
+      summary: "saaras:v3 STT 0.58s, saaras:v4 0.68s (worse on fillers), saarika:flash deprecated; sarvam-105b-conversations polish 0.28s; Swift 6.2 on macOS 26.5; Apple Development identity present."
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Scaffold SwiftPM app and implement core: config, audio recorder (16k mono + levels), Sarvam client (chunking + polish), text inserter, hotkey monitor."
+    allowed_files:
+      - "Package.swift"
+      - "Sources/TypeLikeMe/main.swift"
+      - "Sources/TypeLikeMe/Core/AudioRecorder.swift"
+      - "Sources/TypeLikeMe/Core/DictationController.swift"
+      - "Sources/TypeLikeMe/Core/HotkeyMonitor.swift"
+      - "Sources/TypeLikeMe/Core/Permissions.swift"
+      - "Sources/TypeLikeMe/Core/SarvamClient.swift"
+      - "Sources/TypeLikeMe/Core/Settings.swift"
+      - "Sources/TypeLikeMe/Core/Store.swift"
+      - "Sources/TypeLikeMe/Core/TextInserter.swift"
+    verify:
+      - "swift build -c release"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Package.swift
+        - Sources/TypeLikeMe/main.swift
+        - Sources/TypeLikeMe/Core/AudioRecorder.swift
+        - Sources/TypeLikeMe/Core/DictationController.swift
+        - Sources/TypeLikeMe/Core/HotkeyMonitor.swift
+        - Sources/TypeLikeMe/Core/Permissions.swift
+        - Sources/TypeLikeMe/Core/SarvamClient.swift
+        - Sources/TypeLikeMe/Core/Settings.swift
+        - Sources/TypeLikeMe/Core/Store.swift
+        - Sources/TypeLikeMe/Core/TextInserter.swift
+      commands:
+        - cmd: "swift build -c release"
+          status: pass
+        - cmd: "TypeLikeMe --selftest /tmp/tlm_a.wav"
+          status: pass
+        - cmd: "TypeLikeMe --selftest /tmp/tlm_long.wav (53s, 3 chunks)"
+          status: pass
+      summary: "STT 0.6-0.8s, polish 0.2-0.4s; self-corrections applied; 53s audio chunked at pauses and stitched with no lost words."
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Floating pill overlay (NSPanel) with live waveform, states: idle/listening/processing/done/error."
+    allowed_files:
+      - "Sources/TypeLikeMe/UI/PillOverlay.swift"
+      - "Sources/TypeLikeMe/UI/Theme.swift"
+    verify:
+      - "swift build -c release"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Sources/TypeLikeMe/UI/PillOverlay.swift
+        - Sources/TypeLikeMe/UI/Theme.swift
+      commands:
+        - cmd: "click pill -> speak -> click pill; screencapture each state"
+          status: pass
+      summary: "Live run: listening (waveform+timer+lock), Writing, done preview with Sarvam transcript all captured on screen."
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Dashboard window: Home stats + activity chart, History, Dictionary/snippets, Style, Settings, onboarding permissions."
+    allowed_files:
+      - "Sources/TypeLikeMe/Dashboard/DashboardView.swift"
+      - "Sources/TypeLikeMe/Dashboard/HomePage.swift"
+      - "Sources/TypeLikeMe/Dashboard/Pages.swift"
+      - "Sources/TypeLikeMe/Core/Permissions.swift"
+    verify:
+      - "swift build -c release"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Sources/TypeLikeMe/Dashboard/DashboardView.swift
+        - Sources/TypeLikeMe/Dashboard/HomePage.swift
+        - Sources/TypeLikeMe/Dashboard/Pages.swift
+        - Sources/TypeLikeMe/Core/Permissions.swift
+      commands:
+        - cmd: "TYPELIKEME_DEMO=1 run + screenshots of Home/Style/Settings"
+          status: pass
+      summary: "Aurora-themed dashboard verified visually; chart labels, app icons and card alignment fixed after review. Dashboard SwiftUI tree torn down on close (idle CPU 16% -> 0%)."
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Packaging: build-app.sh bundles/signs .app, writes key config, installs to /Applications; CLI self-test of STT pipeline."
+    allowed_files:
+      - "scripts/build-app.sh"
+      - "README.md"
+      - ".gitignore"
+    verify:
+      - "./scripts/build-app.sh"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - scripts/build-app.sh
+        - README.md
+        - .gitignore
+      commands:
+        - cmd: "./scripts/build-app.sh"
+          status: pass
+      summary: "Signed with Apple Development identity (TCC grants persist across rebuilds); 1.9 MB app; idle 0.0% CPU / 38 MB RSS; generated icns from SwiftUI art."
+  - id: T006
+    type: pm
+    assignee: PM
+    status: done
+    objective: "Verify physical fn hold-to-talk in the installed app."
+    receipt:
+      result: done
+      summary: "Owner granted permissions; fnUsage=0, trusted=true. Real dictation from Zed in history; simulated fn hold/tap into TextEdit pasted correctly (~0.7s after release)."
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Round 2: tap=hands-free/hold=PTT, cursor-context formatting, Wispr-style prompt, question fix, logging, and a restrained native UI redesign."
+    allowed_files:
+      - "Sources/TypeLikeMe/Core/DictationController.swift"
+      - "Sources/TypeLikeMe/Core/SarvamClient.swift"
+      - "Sources/TypeLikeMe/Core/CursorContext.swift"
+      - "Sources/TypeLikeMe/Core/Log.swift"
+      - "Sources/TypeLikeMe/Core/Settings.swift"
+      - "Sources/TypeLikeMe/UI/Theme.swift"
+      - "Sources/TypeLikeMe/UI/PillOverlay.swift"
+      - "Sources/TypeLikeMe/Dashboard/DashboardView.swift"
+      - "Sources/TypeLikeMe/Dashboard/HomePage.swift"
+      - "Sources/TypeLikeMe/Dashboard/Pages.swift"
+      - "Sources/TypeLikeMe/main.swift"
+      - "README.md"
+    verify:
+      - "./scripts/build-app.sh"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Sources/TypeLikeMe/Core/DictationController.swift
+        - Sources/TypeLikeMe/Core/SarvamClient.swift
+        - Sources/TypeLikeMe/Core/CursorContext.swift
+        - Sources/TypeLikeMe/Core/Log.swift
+        - Sources/TypeLikeMe/Core/Settings.swift
+        - Sources/TypeLikeMe/UI/Theme.swift
+        - Sources/TypeLikeMe/UI/PillOverlay.swift
+        - Sources/TypeLikeMe/Dashboard/DashboardView.swift
+        - Sources/TypeLikeMe/Dashboard/HomePage.swift
+        - Sources/TypeLikeMe/Dashboard/Pages.swift
+        - Sources/TypeLikeMe/main.swift
+        - README.md
+      commands:
+        - cmd: "./scripts/build-app.sh"
+          status: pass
+        - cmd: "TypeLikeMe --format (14-case battery)"
+          status: pass
+        - cmd: "fn hold + fn tap into TextEdit (installed app)"
+          status: pass
+      summary: "Mid-sentence continuation, verbatim code/commands, email paragraphs, numbers, Hinglish all correct; idle 0.0% CPU / 31 MB; app 888 KB."
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Stop the fn emoji picker; particle-based dictation UI with flight-to-caret delivery."
+    allowed_files:
+      - "Sources/TypeLikeMe/Core/HotkeyMonitor.swift"
+      - "Sources/TypeLikeMe/Core/CursorContext.swift"
+      - "Sources/TypeLikeMe/Core/DictationController.swift"
+      - "Sources/TypeLikeMe/Core/Settings.swift"
+      - "Sources/TypeLikeMe/UI/Particles.swift"
+      - "Sources/TypeLikeMe/UI/FlightPanel.swift"
+      - "Sources/TypeLikeMe/UI/PillOverlay.swift"
+      - "Sources/TypeLikeMe/Dashboard/Pages.swift"
+      - "Sources/TypeLikeMe/main.swift"
+      - "README.md"
+    verify:
+      - "./scripts/build-app.sh"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Sources/TypeLikeMe/Core/HotkeyMonitor.swift
+        - Sources/TypeLikeMe/Core/CursorContext.swift
+        - Sources/TypeLikeMe/Core/DictationController.swift
+        - Sources/TypeLikeMe/Core/Settings.swift
+        - Sources/TypeLikeMe/UI/Particles.swift
+        - Sources/TypeLikeMe/UI/FlightPanel.swift
+        - Sources/TypeLikeMe/UI/PillOverlay.swift
+        - Sources/TypeLikeMe/Dashboard/Pages.swift
+        - Sources/TypeLikeMe/main.swift
+        - README.md
+      commands:
+        - cmd: "./scripts/build-app.sh"
+          status: pass
+        - cmd: "fn dictation into TextEdit with frame captures (assemble, ribbon, ring, flight to caret)"
+          status: pass
+      summary: "Active event tap on its own thread swallows bare fn (emoji fix, needs owner confirmation with physical key). Particles: ~12% CPU of one core while active, 0% idle."
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Raycast-style redesign; Metal fine-dust nebula; transcript words formed from particles (image-sampled targets, as in vellabs ManifestoField)."
+    allowed_files:
+      - "Sources/TypeLikeMe/UI/Nebula.swift"
+      - "Sources/TypeLikeMe/UI/PillOverlay.swift"
+      - "Sources/TypeLikeMe/UI/Theme.swift"
+      - "Sources/TypeLikeMe/UI/FlightPanel.swift"
+      - "Sources/TypeLikeMe/Dashboard/DashboardView.swift"
+      - "Sources/TypeLikeMe/Dashboard/HomePage.swift"
+      - "Sources/TypeLikeMe/Dashboard/Pages.swift"
+      - "Sources/TypeLikeMe/Core/DictationController.swift"
+      - "Sources/TypeLikeMe/Core/Permissions.swift"
+      - "Sources/TypeLikeMe/main.swift"
+      - "README.md"
+    verify:
+      - "./scripts/build-app.sh"
+    stop_if:
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - Sources/TypeLikeMe/UI/Nebula.swift
+        - Sources/TypeLikeMe/UI/PillOverlay.swift
+        - Sources/TypeLikeMe/UI/Theme.swift
+        - Sources/TypeLikeMe/UI/FlightPanel.swift
+        - Sources/TypeLikeMe/Dashboard/DashboardView.swift
+        - Sources/TypeLikeMe/Dashboard/HomePage.swift
+        - Sources/TypeLikeMe/Dashboard/Pages.swift
+        - Sources/TypeLikeMe/Core/DictationController.swift
+        - Sources/TypeLikeMe/Core/Permissions.swift
+        - Sources/TypeLikeMe/main.swift
+        - README.md
+      commands:
+        - cmd: "./scripts/build-app.sh"
+          status: pass
+        - cmd: "fn dictation into TextEdit, frame captures of ring -> words -> dissolve -> Pasted"
+          status: pass
+      summary: "Words form from ~3.6k GPU particles, paste lands as they dissolve (~0.5s added, toggleable). Idle 0% CPU / 14 MB; dashboard nebulas pause when occluded; fixed dashboard reopening every launch."
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Audit whether the full original outcome is complete."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "missing evidence"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      missing_evidence:
+        - "Command mode (fn+ctrl) not exercised live (non-blocking)"
+      summary: "fn hold/tap dictation verified end-to-end in the installed app, with Wispr-style formatting and a redesigned UI."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T005
+    commands:
+      - "swift build -c release"
+      - "./scripts/build-app.sh"
+      - "TypeLikeMe --selftest /tmp/tlm_a.wav"
