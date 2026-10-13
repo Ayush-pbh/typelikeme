@@ -1,0 +1,21 @@
+# Build output
+.build/
+build/
+*.app
+.swiftpm/
+DerivedData/
+xcuserdata/
+
+# Secrets: never commit keys or signing material
+.env
+.env.*
+!.env.example
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+config.json
+
+# macOS and logs
+.DS_Store
+*.log
