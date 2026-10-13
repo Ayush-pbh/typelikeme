@@ -118,6 +118,31 @@ final class AppSettings: ObservableObject {
     @Published var contextAware: Bool = d.object(forKey: "contextAware") as? Bool ?? true { didSet { Self.d.set(contextAware, forKey: "contextAware") } }
     /// Where the dictation bar docks along the bottom edge: "left", "center" or "right".
     @Published var barAnchor: String = d.string(forKey: "barAnchor") ?? "center" { didSet { Self.d.set(barAnchor, forKey: "barAnchor") } }
+    /// "sarvam" (cloud) or "local" (a model on this Mac, Gemma 4 by default) for formatting and Prompt mode.
+    @Published var engine: String = d.string(forKey: "engine") ?? "sarvam" { didSet { Self.d.set(engine, forKey: "engine") } }
+    @Published var localKind: String = d.string(forKey: "localKind") ?? "ollama" { didSet { Self.d.set(localKind, forKey: "localKind") } }
+    @Published var localEndpoint: String = d.string(forKey: "localEndpoint") ?? "http://localhost:11434" { didSet { Self.d.set(localEndpoint, forKey: "localEndpoint") } }
+    @Published var localModel: String = d.string(forKey: "localModel") ?? "gemma4:e4b-it-qat" { didSet { Self.d.set(localModel, forKey: "localModel") } }
+
+    /// "sarvam", "parakeet" (on this Mac, Core ML) or "local" (Gemma audio model via Ollama).
+    @Published var transcriber: String = d.string(forKey: "transcriber") ?? "sarvam" { didSet { Self.d.set(transcriber, forKey: "transcriber") } }
+
+    var localSpeech: (endpoint: String, model: String)? {
+        transcriber == "local" && localKind == "ollama" ? (localEndpoint, localModel) : nil
+    }
+    /// Which setup the user picked in "Choose your setup" ("" until they choose).
+    @Published var setupChosen: String = d.string(forKey: "setupChosen") ?? "" { didSet { Self.d.set(setupChosen, forKey: "setupChosen") } }
+
+    var useParakeet: Bool { transcriber == "parakeet" }
+    /// The Sarvam key is only needed if something still runs on Sarvam.
+    var needsSarvamKey: Bool { (localSpeech == nil && !useParakeet) || engine != "local" }
+
+    var chatEngine: ChatEngine {
+        engine == "local"
+            ? .local(kind: ChatEngine.LocalKind(rawValue: localKind) ?? .ollama, endpoint: localEndpoint, model: localModel)
+            : .sarvam
+    }
+
     @Published var promptMode: Bool = d.object(forKey: "promptMode") as? Bool ?? true { didSet { Self.d.set(promptMode, forKey: "promptMode") } }
     @Published var smartFormat: Bool = d.object(forKey: "smartFormat") as? Bool ?? true { didSet { Self.d.set(smartFormat, forKey: "smartFormat") } }
     @Published var particles: Bool = d.object(forKey: "particles") as? Bool ?? true { didSet { Self.d.set(particles, forKey: "particles") } }

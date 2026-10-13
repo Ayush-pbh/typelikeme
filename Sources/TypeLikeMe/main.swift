@@ -7,6 +7,22 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--format" {
     SelfTest.format(Array(CommandLine.arguments.dropFirst(2)))
 }
 
+// Resource check: `TypeLikeMe --parakeet-bench file.wav N` loads Parakeet and transcribes N times.
+if CommandLine.arguments.count >= 4, CommandLine.arguments[1] == "--parakeet-bench" {
+    let path = CommandLine.arguments[2], n = Int(CommandLine.arguments[3]) ?? 10
+    Task.detached {
+        let data = try! Data(contentsOf: URL(fileURLWithPath: path)).dropFirst(44)
+        let samples: [Int16] = data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+        let t0 = Date(); try! await ParakeetEngine.shared.prepare()
+        print("load: \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+        let t1 = Date()
+        for _ in 0..<n { _ = try! await ParakeetEngine.shared.transcribe(samples) }
+        print("\(n) transcriptions: \(Int(Date().timeIntervalSince(t1) * 1000)) ms total")
+        exit(0)
+    }
+    while true { RunLoop.main.run() }
+}
+
 // CLI self-test: `TypeLikeMe --selftest file.wav` runs the Sarvam pipeline headlessly.
 if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--selftest" {
     SelfTest.run(path: CommandLine.arguments[2])
@@ -102,7 +118,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             controller.runPillDemo(text: demo.count > 3 ? demo : "The new pixel bar is thin, sharp, and it types my words.")
             return
         }
-        controller.start()
+        // Preview copies (sample data) never listen to the fn key, so they can't double up with the real app.
+        if ProcessInfo.processInfo.environment["TYPELIKEME_DEMO"] == nil { controller.start() }
+        // Keep Parakeet loaded whenever it's the speech engine, so dictations never wait for it.
+        AppSettings.shared.$transcriber.sink { value in
+            if value == "parakeet" { Task { try? await ParakeetEngine.shared.prepare() } }
+        }.store(in: &cancellables)
         // Using fn for dictation means macOS must not also open emoji on it.
         if AppSettings.shared.trigger == .fn { FnUsage.setDoNothing(force: false) }
         if !AudioRecorder.hasPermission { AudioRecorder.requestPermission { _ in } }
@@ -111,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let s = AppSettings.shared
         let ready = TextInserter.isTrusted && AudioRecorder.hasPermission && !s.apiKey.isEmpty
         if ready { s.onboarded = true }
-        if !s.onboarded || !TextInserter.isTrusted {
+        if !s.onboarded || !TextInserter.isTrusted || ProcessInfo.processInfo.environment["TYPELIKEME_DEMO"] != nil {
             showDashboard()
         }
     }
@@ -186,7 +207,16 @@ enum SelfTest {
                 let key = AppSettings.loadAPIKey()
                 print("key: \(key.isEmpty ? "MISSING" : "found (\(key.prefix(4))…)")")
                 print("audio: \(String(format: "%.2f", Double(samples.count) / 16000)) s, chunks: \(WAV.chunks(samples).count), silent: \(WAV.isSilent(samples))")
-                let client = SarvamClient(apiKey: key)
+                var client = SarvamClient(apiKey: key)
+                // TLM_SPEECH=local transcribes with the local model (TLM_LOCAL_MODEL, default gemma4:e4b).
+                let env = ProcessInfo.processInfo.environment
+                if env["TLM_SPEECH"] == "parakeet" {
+                    client.parakeet = true
+                    let t = Date(); try await ParakeetEngine.shared.prepare()
+                    print("parakeet load: \(ms(t))")
+                }
+                if env["TLM_SPEECH"] == "local" { client.localSpeech = (env["TLM_LOCAL_ENDPOINT"] ?? "http://localhost:11434", env["TLM_LOCAL_MODEL"] ?? "gemma4:e4b-it-qat") }
+                if env["TLM_ENGINE"] == "local" { client.engine = .local(kind: .ollama, endpoint: env["TLM_LOCAL_ENDPOINT"] ?? "http://localhost:11434", model: env["TLM_LOCAL_MODEL"] ?? "gemma4:e4b-it-qat") }
                 var t0 = Date()
                 let t = try await client.transcribe(samples: samples, model: "saaras:v3", language: "unknown", mode: .transcribe)
                 print("stt  [\(ms(t0))]: \(t.text)  (\(t.language))")
@@ -208,7 +238,13 @@ enum SelfTest {
     static func format(_ a: [String]) -> Never {
         Task.detached {
             let ctx = CursorContext(before: a.count > 1 && a[1] != "-" ? a[1] : nil, appName: a.count > 2 ? a[2] : "", bundleID: a.count > 3 ? a[3] : "")
-            let client = SarvamClient(apiKey: AppSettings.loadAPIKey())
+            var client = SarvamClient(apiKey: AppSettings.loadAPIKey())
+            // TLM_ENGINE=local tests the on-device model (TLM_LOCAL_MODEL / TLM_LOCAL_ENDPOINT override the defaults).
+            let env = ProcessInfo.processInfo.environment
+            if env["TLM_ENGINE"] == "local" {
+                client.engine = .local(kind: .ollama, endpoint: env["TLM_LOCAL_ENDPOINT"] ?? "http://localhost:11434",
+                                       model: env["TLM_LOCAL_MODEL"] ?? "gemma4:e4b-it-qat")
+            }
             do {
                 let t0 = Date()
                 let p = SarvamClient.isAITool(ctx)

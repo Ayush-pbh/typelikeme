@@ -36,8 +36,27 @@ enum SarvamError: LocalizedError {
 }
 
 /// Thin async client for Sarvam's speech-to-text and chat endpoints. No SDKs.
+/// Where formatting, Prompt mode and command mode run.
+enum ChatEngine: Equatable {
+    /// Sarvam's cloud model.
+    case sarvam
+    /// A model on this Mac: Ollama's native API, or any OpenAI-compatible server (LM Studio, mlx_lm, llama.cpp).
+    case local(kind: LocalKind, endpoint: String, model: String)
+
+    enum LocalKind: String, CaseIterable, Identifiable {
+        case ollama, openai
+        var id: String { rawValue }
+        var label: String { self == .ollama ? "Ollama" : "OpenAI-compatible" }
+    }
+}
+
 struct SarvamClient {
     var apiKey: String
+    var engine: ChatEngine = .sarvam
+    /// Where speech is transcribed: Sarvam, or a local audio model (Gemma 4 via Ollama).
+    var localSpeech: (endpoint: String, model: String)? = nil
+    /// Use Parakeet on this Mac for speech recognition.
+    var parakeet = false
     static let chatModel = "sarvam-105b-conversations"
 
     private static let session: URLSession = {
@@ -55,6 +74,10 @@ struct SarvamClient {
     }
 
     func transcribe(samples: [Int16], model: String, language: String, mode: OutputMode, keyterms: [String] = []) async throws -> Transcript {
+        // Parakeet takes the whole recording at once (it windows long audio itself).
+        if parakeet {
+            return Transcript(text: try await ParakeetEngine.shared.transcribe(samples), language: language)
+        }
         let pieces = WAV.chunks(samples)
         if pieces.count == 1 {
             return try await transcribe(wav: WAV.encode(pieces[0]), model: model, language: language, mode: mode, keyterms: keyterms)
@@ -74,6 +97,10 @@ struct SarvamClient {
     }
 
     func transcribe(wav: Data, model: String, language: String, mode: OutputMode, keyterms: [String] = []) async throws -> Transcript {
+        if let local = localSpeech {
+            let text = try await LocalLLM.transcribe(endpoint: local.endpoint, model: local.model, wav: wav, keyterms: keyterms)
+            return Transcript(text: text, language: language)
+        }
         guard !apiKey.isEmpty else { throw SarvamError.missingKey }
         let boundary = "tlm-\(UUID().uuidString)"
         var body = Data()
@@ -404,6 +431,13 @@ struct SarvamClient {
 
     func chat(system: String, examples: [(String, String)], user: String, maxTokens: Int,
               model: String = SarvamClient.chatModel, reasoning: String? = nil, temperature: Double = 0.2) async throws -> String {
+        let messages: [[String: Any]] = [["role": "system", "content": system]]
+            + examples.flatMap { [["role": "user", "content": $0.0], ["role": "assistant", "content": $0.1]] }
+            + [["role": "user", "content": user]]
+        if case let .local(kind, endpoint, localModel) = engine {
+            return try await LocalLLM.chat(kind: kind, endpoint: endpoint, model: localModel, messages: messages,
+                                           maxTokens: maxTokens, temperature: temperature)
+        }
         guard !apiKey.isEmpty else { throw SarvamError.missingKey }
         var req = URLRequest(url: URL(string: "https://api.sarvam.ai/v1/chat/completions")!)
         req.httpMethod = "POST"
@@ -413,9 +447,7 @@ struct SarvamClient {
             "model": model,
             "temperature": temperature,
             "max_tokens": maxTokens + (reasoning == nil ? 0 : 1500),
-            "messages": [["role": "system", "content": system]]
-                + examples.flatMap { [["role": "user", "content": $0.0], ["role": "assistant", "content": $0.1]] }
-                + [["role": "user", "content": user]],
+            "messages": messages,
         ]
         if let reasoning { payload["reasoning_effort"] = reasoning }
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)

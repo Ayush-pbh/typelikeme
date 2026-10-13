@@ -248,7 +248,7 @@ final class DictationController: ObservableObject {
             flash(.error("Allow microphone access in Settings"))
             return
         }
-        guard !settings.apiKey.isEmpty else {
+        guard !settings.apiKey.isEmpty || !settings.needsSarvamKey else {
             flash(.error("Add your Sarvam API key in Settings"))
             return
         }
@@ -271,6 +271,9 @@ final class DictationController: ObservableObject {
         phase = .listening
         Sound.play(.start)
         SarvamClient.warmUp()
+        // Load the local model while you talk, so formatting doesn't wait for a cold start.
+        if case let .local(kind, endpoint, model) = settings.chatEngine { LocalLLM.warmUp(kind: kind, endpoint: endpoint, model: model) }
+        else if let speech = settings.localSpeech { LocalLLM.warmUp(kind: .ollama, endpoint: speech.endpoint, model: speech.model) }
         Log.write("listening in \(context?.appName ?? "?") before=\(context?.before.map { "\($0.count) chars" } ?? "n/a")")
 
         watchdog?.invalidate()
@@ -319,7 +322,10 @@ final class DictationController: ObservableObject {
         phase = .processing
         Sound.play(.stop)
 
-        let client = SarvamClient(apiKey: settings.apiKey)
+        var client = SarvamClient(apiKey: settings.apiKey)
+        client.engine = settings.chatEngine
+        client.localSpeech = settings.localSpeech
+        client.parakeet = settings.useParakeet
         let s = settings
         let ctx = context ?? CursorContext(before: nil, appName: "", bundleID: "")
         let vocab = store.vocabulary
@@ -366,7 +372,7 @@ final class DictationController: ObservableObject {
                     output = SmartJoin.apply(output, before: ctx.before, adjustCase: s.polish == .off)
                 }
                 let final = output
-                Log.write("done stt=\(sttMs)ms total=\(Int(Date().timeIntervalSince(t0) * 1000))ms words=\(final.split(separator: " ").count)")
+                Log.write("done speech=\(s.useParakeet ? "parakeet" : (s.localSpeech != nil ? "gemma" : "sarvam")) format=\(s.engine) stt=\(sttMs)ms total=\(Int(Date().timeIntervalSince(t0) * 1000))ms words=\(final.split(separator: " ").count)")
 
                 await MainActor.run {
                     guard let self else { return }
