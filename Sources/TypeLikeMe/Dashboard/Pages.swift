@@ -400,6 +400,20 @@ struct SettingsPage: View {
     @State private var keyDraft = ""
     @State private var keyStatus: (ok: Bool, text: String)?
     @State private var checking = false
+    @State private var localStatus: (ok: Bool, text: String)?
+    @State private var showSetups = false
+    @State private var localChecking = false
+
+    private func checkLocal() {
+        localChecking = true
+        localStatus = nil
+        let kind = ChatEngine.LocalKind(rawValue: settings.localKind) ?? .ollama
+        let endpoint = settings.localEndpoint, model = settings.localModel
+        Task {
+            let r = await LocalLLM.status(kind: kind, endpoint: endpoint, model: model)
+            await MainActor.run { localStatus = (r.ok, r.message); localChecking = false }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -436,6 +450,64 @@ struct SettingsPage: View {
                         Text("saarika:v2.5").tag("saarika:v2.5")
                     }
                     .labelsHidden().fixedSize()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                if showSetups {
+                    SetupChooser(settings: settings) { showSetups = false }
+                } else {
+                    Button { showSetups = true } label: {
+                        Label("Compare setups and speeds", systemImage: "gauge.with.dots.needle.67percent")
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                }
+            }
+
+            section("Intelligence") {
+                SettingRow(title: "Speech recognition", detail: settings.transcriber == "parakeet"
+                           ? "NVIDIA Parakeet on this Mac. Fastest; English and European languages only (no Hindi)."
+                           : settings.transcriber == "local"
+                           ? "Transcribed on this Mac by the local model below (Ollama only)."
+                           : "Sarvam saaras:v4, with your Dictionary words as keyterms.") {
+                    Picker("", selection: $settings.transcriber) {
+                        Text("Sarvam (cloud)").tag("sarvam")
+                        Text("Parakeet (this Mac)").tag("parakeet")
+                        Text("Gemma (this Mac)").tag("local")
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                Divider1()
+                SettingRow(title: "Formatting engine", detail: settings.engine == "local"
+                           ? "Formats and writes prompts on this Mac. Nothing is sent anywhere for this step."
+                           : "Sarvam's cloud model formats your text and writes prompts.") {
+                    Picker("", selection: $settings.engine) {
+                        Text("Sarvam (cloud)").tag("sarvam")
+                        Text("Local model").tag("local")
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                if settings.engine == "local" || settings.transcriber == "local" {
+                    Divider1()
+                    SettingRow(title: "Server", detail: "Ollama by default. LM Studio, mlx_lm and llama.cpp work as OpenAI-compatible.") {
+                        Picker("", selection: $settings.localKind) {
+                            ForEach(ChatEngine.LocalKind.allCases) { Text($0.label).tag($0.rawValue) }
+                        }
+                        .labelsHidden().fixedSize()
+                    }
+                    Divider1()
+                    HStack(spacing: 8) {
+                        PlainField(text: $settings.localEndpoint, placeholder: "http://localhost:11434")
+                        PlainField(text: $settings.localModel, placeholder: "gemma4:e4b-it-qat").frame(width: 150)
+                        Button(localChecking ? "Checking…" : "Check", action: checkLocal).buttonStyle(ActionButtonStyle())
+                            .disabled(localChecking)
+                    }
+                    .padding(12)
+                    if let localStatus {
+                        Label(localStatus.text, systemImage: localStatus.ok ? "checkmark" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 12)).foregroundStyle(localStatus.ok ? Theme.green : Theme.yellow)
+                            .padding(.horizontal, 12).padding(.bottom, 12)
+                    }
                 }
             }
 

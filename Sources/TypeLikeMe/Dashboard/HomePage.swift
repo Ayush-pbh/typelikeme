@@ -13,6 +13,10 @@ struct HomePage: View {
             if !perms.allGood {
                 SetupPanel(perms: perms, settings: settings, go: go)
             }
+            // New users pick how TypeLikeMe runs, with real timings side by side.
+            if settings.setupChosen.isEmpty || ProcessInfo.processInfo.environment["TYPELIKEME_SHOW_SETUP"] != nil {
+                SetupChooser(settings: settings)
+            }
             Hero(controller: controller, settings: settings)
             if store.history.count < 5 {
                 TryIt(trigger: settings.trigger.short)
